@@ -45,19 +45,13 @@ function App() {
   }
 
   if (!user) {
-    // Show login or signup based on route
-    if (route === '/signup') {
-      return <Auth mode="signup" />;
-    }
-    return <Auth mode="login" />;
+    return <Auth />;
   }
 
   if (typeof route === 'string') {
     switch (route) {
-      case '/login':
-      case '/signup':
       case '/auth':
-        return <Auth mode={route === '/signup' ? 'signup' : 'login'} />;
+        return <Auth />;
       case '/dashboard':
         return <Dashboard />;
       case '/modules':

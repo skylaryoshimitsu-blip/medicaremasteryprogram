@@ -17,6 +17,8 @@ import Profile from './pages/Profile';
 import AdminAnswerKeys from './pages/AdminAnswerKeys';
 import PhaseUnlock from './pages/PhaseUnlock';
 import { ExamProofUpload } from './pages/ExamProofUpload';
+import { Success } from './pages/Success';
+import { Cancel } from './pages/Cancel';
 import { ProtectedAdminRoute } from './components/ProtectedAdminRoute';
 
 function App() {
@@ -34,14 +36,28 @@ function App() {
     );
   }
 
+  // Success and cancel pages should be accessible during payment flow
+  if (route === '/success') {
+    return <Success />;
+  }
+  if (route === '/cancel') {
+    return <Cancel />;
+  }
+
   if (!user) {
-    return <Auth />;
+    // Show login or signup based on route
+    if (route === '/signup') {
+      return <Auth mode="signup" />;
+    }
+    return <Auth mode="login" />;
   }
 
   if (typeof route === 'string') {
     switch (route) {
+      case '/login':
+      case '/signup':
       case '/auth':
-        return <Auth />;
+        return <Auth mode={route === '/signup' ? 'signup' : 'login'} />;
       case '/dashboard':
         return <Dashboard />;
       case '/modules':

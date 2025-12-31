@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from '../hooks/useNavigate';
 
-export function Auth() {
-  const [isLogin, setIsLogin] = useState(true);
+interface AuthProps {
+  mode?: 'login' | 'signup';
+}
+
+export function Auth({ mode = 'login' }: AuthProps) {
+  const [isLogin, setIsLogin] = useState(mode === 'login');
+
+  // Sync with mode prop when it changes (e.g., URL navigation)
+  useEffect(() => {
+    setIsLogin(mode === 'login');
+  }, [mode]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -122,8 +131,8 @@ export function Auth() {
           <div className="mt-4 text-center">
             <button
               onClick={() => {
-                setIsLogin(!isLogin);
                 setError('');
+                navigate(isLogin ? '/signup' : '/login');
               }}
               className="text-sm text-blue-600 hover:text-blue-700"
             >

@@ -79,6 +79,18 @@ export type QuizAttempt = {
   created_at: string;
 };
 
+export type Entitlement = {
+  id: string;
+  user_id: string;
+  has_active_access: boolean;
+  payment_verified: boolean;
+  stripe_payment_intent_id: string | null;
+  stripe_customer_id: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string | null;
+};
+
 // Admin role helper functions
 export async function isAdmin(): Promise<boolean> {
   const { data, error } = await supabase.rpc('is_admin');

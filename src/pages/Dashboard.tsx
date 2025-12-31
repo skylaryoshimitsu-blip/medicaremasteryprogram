@@ -4,8 +4,10 @@ import { supabase, Module, UserProgress } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useProgress } from '../contexts/ProgressContext';
 import { useNavigate } from '../hooks/useNavigate';
+import { useEntitlement } from '../hooks/useEntitlement';
 import { Sidebar } from '../components/Sidebar';
 import { ProgressBar } from '../components/ProgressBar';
+import { PaymentRequired } from '../components/PaymentRequired';
 
 type PhaseUnlock = {
   id: string;
@@ -18,9 +20,11 @@ export function Dashboard() {
   const { user, profile } = useAuth();
   const { refreshProgress } = useProgress();
   const navigate = useNavigate();
+  const { hasAccess, loading: entitlementLoading } = useEntitlement();
   const [modules, setModules] = useState<(Module & { progress?: UserProgress })[]>([]);
   const [phaseUnlocks, setPhaseUnlocks] = useState<PhaseUnlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -127,6 +131,19 @@ export function Dashboard() {
     (m) => m.progress?.is_unlocked && !m.progress?.is_completed
   );
 
+  function handleModuleClick(module: Module & { progress?: UserProgress }) {
+    const isLocked = !module.progress?.is_unlocked;
+    if (isLocked) return;
+
+    // Check if user has paid before accessing any content
+    if (!hasAccess) {
+      setShowPaymentModal(true);
+      return;
+    }
+
+    navigate({ type: 'module', id: module.id });
+  }
+
   if (loading) {
     return (
       <div className="flex">
@@ -154,7 +171,7 @@ export function Dashboard() {
 
           {continueModule && (
             <div
-              onClick={() => navigate({ type: 'module', id: continueModule.id })}
+              onClick={() => handleModuleClick(continueModule)}
               className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-6 mb-8 cursor-pointer hover:from-blue-600 hover:to-blue-700 transition-all"
             >
               <div className="flex items-center justify-between text-white">
@@ -188,7 +205,7 @@ export function Dashboard() {
               return (
                 <div
                   key={module.id}
-                  onClick={() => !isLocked && navigate({ type: 'module', id: module.id })}
+                  onClick={() => handleModuleClick(module)}
                   className={`bg-white rounded-lg border border-gray-200 p-6 ${
                     isLocked ? 'opacity-60' : 'cursor-pointer hover:border-blue-300 hover:shadow-md'
                   } transition-all`}
@@ -235,6 +252,10 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {showPaymentModal && (
+        <PaymentRequired onClose={() => setShowPaymentModal(false)} />
+      )}
     </div>
   );
 }

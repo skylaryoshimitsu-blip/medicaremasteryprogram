@@ -3,13 +3,17 @@ import { CheckCircle, Lock, PlayCircle } from 'lucide-react';
 import { supabase, Module, UserProgress } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from '../hooks/useNavigate';
+import { useEntitlement } from '../hooks/useEntitlement';
 import { Sidebar } from '../components/Sidebar';
+import { PaymentRequired } from '../components/PaymentRequired';
 
 export function ModulesList() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { hasAccess } = useEntitlement();
   const [modules, setModules] = useState<(Module & { progress?: UserProgress })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   useEffect(() => {
     loadModules();
@@ -99,6 +103,8 @@ export function ModulesList() {
                   onClick={() => {
                     if (isLocked) {
                       alert('Complete previous phases first.');
+                    } else if (!hasAccess) {
+                      setShowPaymentModal(true);
                     } else {
                       navigate({ type: 'module', id: module.id });
                     }
@@ -142,6 +148,10 @@ export function ModulesList() {
           )}
         </div>
       </div>
+
+      {showPaymentModal && (
+        <PaymentRequired onClose={() => setShowPaymentModal(false)} />
+      )}
     </div>
   );
 }

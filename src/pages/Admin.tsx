@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Check, X, XCircle, Save, Trash2 } from 'lucide-react';
 import { supabase, Profile, Module } from '../lib/supabase';
 import { Sidebar } from '../components/Sidebar';
+import { useAuth } from '../contexts/AuthContext';
 
 type UserWithProgress = Profile & {
   progress: number;
@@ -11,6 +12,15 @@ type UserWithProgress = Profile & {
 type QuizQuestion = {
   id: string;
   quiz_id: string;
+  question_text: string;
+  options: string[];
+  correct_answer: number;
+  order_index: number;
+};
+
+type LessonQuizQuestion = {
+  id: string;
+  lesson_quiz_id: string;
   question_text: string;
   options: string[];
   correct_answer: number;
@@ -150,6 +160,218 @@ function QuizQuestionEditor({
   );
 }
 
+function LessonQuizQuestionEditor({
+  question,
+  index,
+  onSave,
+  onDelete,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
+}: {
+  question: LessonQuizQuestion;
+  index: number;
+  onSave: (question: LessonQuizQuestion) => void;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const [editedQuestion, setEditedQuestion] = useState(question);
+  const [isEditing, setIsEditing] = useState(false);
+
+  const handleSave = () => {
+    onSave(editedQuestion);
+    setIsEditing(false);
+  };
+
+  const moveOptionUp = (idx: number) => {
+    if (idx === 0) return;
+    const newOptions = [...editedQuestion.options];
+    [newOptions[idx - 1], newOptions[idx]] = [newOptions[idx], newOptions[idx - 1]];
+    let newCorrectAnswer = editedQuestion.correct_answer;
+    if (editedQuestion.correct_answer === idx) {
+      newCorrectAnswer = idx - 1;
+    } else if (editedQuestion.correct_answer === idx - 1) {
+      newCorrectAnswer = idx;
+    }
+    setEditedQuestion({ ...editedQuestion, options: newOptions, correct_answer: newCorrectAnswer });
+  };
+
+  const moveOptionDown = (idx: number) => {
+    if (idx === editedQuestion.options.length - 1) return;
+    const newOptions = [...editedQuestion.options];
+    [newOptions[idx], newOptions[idx + 1]] = [newOptions[idx + 1], newOptions[idx]];
+    let newCorrectAnswer = editedQuestion.correct_answer;
+    if (editedQuestion.correct_answer === idx) {
+      newCorrectAnswer = idx + 1;
+    } else if (editedQuestion.correct_answer === idx + 1) {
+      newCorrectAnswer = idx;
+    }
+    setEditedQuestion({ ...editedQuestion, options: newOptions, correct_answer: newCorrectAnswer });
+  };
+
+  if (!isEditing) {
+    return (
+      <div className="px-6 py-4">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="font-medium text-gray-900 mb-2">
+              Question {index + 1}: {question.question_text}
+            </div>
+            <div className="space-y-1">
+              {question.options.map((option, idx) => (
+                <div
+                  key={idx}
+                  className={`text-sm ${
+                    idx === question.correct_answer
+                      ? 'text-green-600 font-medium'
+                      : 'text-gray-600'
+                  }`}
+                >
+                  {String.fromCharCode(65 + idx)}. {option}
+                  {idx === question.correct_answer && ' (Correct)'}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 ml-4">
+            <button
+              onClick={() => onMoveUp()}
+              disabled={isFirst}
+              className={`p-2 rounded ${
+                isFirst
+                  ? 'text-gray-300 cursor-not-allowed'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+              title="Move Up"
+            >
+              ↑
+            </button>
+            <button
+              onClick={() => onMoveDown()}
+              disabled={isLast}
+              className={`p-2 rounded ${
+                isLast
+                  ? 'text-gray-300 cursor-not-allowed'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+              title="Move Down"
+            >
+              ↓
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+              title="Edit"
+            >
+              <Save size={18} />
+            </button>
+            <button
+              onClick={onDelete}
+              className="p-2 text-red-600 hover:bg-red-50 rounded"
+              title="Delete"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-6 py-4 bg-gray-50">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Question {index + 1}
+          </label>
+          <textarea
+            value={editedQuestion.question_text}
+            onChange={(e) =>
+              setEditedQuestion({ ...editedQuestion, question_text: e.target.value })
+            }
+            rows={3}
+            className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-gray-700">Options</label>
+          {editedQuestion.options.map((option, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => moveOptionUp(idx)}
+                  disabled={idx === 0}
+                  className={`text-xs ${
+                    idx === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={() => moveOptionDown(idx)}
+                  disabled={idx === editedQuestion.options.length - 1}
+                  className={`text-xs ${
+                    idx === editedQuestion.options.length - 1 ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ▼
+                </button>
+              </div>
+              <span className="text-sm font-medium text-gray-600 w-6">
+                {String.fromCharCode(65 + idx)}.
+              </span>
+              <input
+                type="text"
+                value={option}
+                onChange={(e) => {
+                  const newOptions = [...editedQuestion.options];
+                  newOptions[idx] = e.target.value;
+                  setEditedQuestion({ ...editedQuestion, options: newOptions });
+                }}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="radio"
+                name={`correct-${question.id}`}
+                checked={editedQuestion.correct_answer === idx}
+                onChange={() =>
+                  setEditedQuestion({ ...editedQuestion, correct_answer: idx })
+                }
+                className="w-4 h-4"
+              />
+              <label className="text-xs text-gray-500">Correct</label>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => {
+              setEditedQuestion(question);
+              setIsEditing(false);
+            }}
+            className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type StudentWithDetails = Profile & {
   currentPhase: number | null;
   examStatus: 'passed' | 'not_passed' | 'not_attempted';
@@ -196,6 +418,8 @@ type Quiz = {
 };
 
 export function Admin() {
+  const { profile } = useAuth();
+  const isQuizAdmin = profile?.email === 'support@medicaremastery.com';
   const [activeTab, setActiveTab] = useState<Tab>('students');
   const [students, setStudents] = useState<StudentWithDetails[]>([]);
   const [usersWithProgress, setUsersWithProgress] = useState<UserWithProgress[]>([]);
@@ -210,6 +434,8 @@ export function Admin() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [lessonQuizzes, setLessonQuizzes] = useState<any[]>([]);
+  const [lessonQuizQuestions, setLessonQuizQuestions] = useState<LessonQuizQuestion[]>([]);
   const [editingLesson, setEditingLesson] = useState(false);
   const [rejectingUpload, setRejectingUpload] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -704,6 +930,162 @@ export function Admin() {
     }
 
     loadQuizQuestions(quizId);
+  }
+
+  async function loadLessonQuiz(lessonId: string) {
+    const { data: quizData } = await supabase
+      .from('lesson_quizzes')
+      .select('*')
+      .eq('lesson_id', lessonId)
+      .maybeSingle();
+
+    if (quizData) {
+      setLessonQuizzes([quizData]);
+      loadLessonQuizQuestions(quizData.id);
+    } else {
+      setLessonQuizzes([]);
+      setLessonQuizQuestions([]);
+    }
+  }
+
+  async function loadLessonQuizQuestions(lessonQuizId: string) {
+    const { data } = await supabase
+      .from('lesson_quiz_questions')
+      .select('*')
+      .eq('lesson_quiz_id', lessonQuizId)
+      .order('order_index');
+
+    if (data) {
+      setLessonQuizQuestions(
+        data.map((q) => ({
+          ...q,
+          options: q.options as string[],
+        }))
+      );
+    }
+  }
+
+  async function saveLessonQuizQuestion(question: LessonQuizQuestion) {
+    if (!isQuizAdmin) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from('lesson_quiz_questions')
+      .update({
+        question_text: question.question_text,
+        options: question.options,
+        correct_answer: question.correct_answer,
+      })
+      .eq('id', question.id);
+
+    await supabase
+      .from('admin_action_logs')
+      .insert({
+        admin_user_id: user.id,
+        action_type: 'lesson_quiz_updated',
+        target_type: 'lesson_quiz_question',
+        target_id: question.id,
+        details: {
+          lesson_quiz_id: question.lesson_quiz_id,
+          question_text: question.question_text,
+        },
+      });
+
+    loadLessonQuizQuestions(question.lesson_quiz_id);
+  }
+
+  async function deleteLessonQuizQuestion(questionId: string, lessonQuizId: string) {
+    if (!isQuizAdmin) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    if (!confirm('Delete this question?')) return;
+
+    await supabase.from('lesson_quiz_questions').delete().eq('id', questionId);
+
+    await supabase
+      .from('admin_action_logs')
+      .insert({
+        admin_user_id: user.id,
+        action_type: 'lesson_quiz_question_deleted',
+        target_type: 'lesson_quiz_question',
+        target_id: questionId,
+        details: {
+          lesson_quiz_id: lessonQuizId,
+        },
+      });
+
+    loadLessonQuizQuestions(lessonQuizId);
+  }
+
+  async function addLessonQuizQuestion(lessonQuizId: string) {
+    if (!isQuizAdmin) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: maxOrderData } = await supabase
+      .from('lesson_quiz_questions')
+      .select('order_index')
+      .eq('lesson_quiz_id', lessonQuizId)
+      .order('order_index', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextOrder = maxOrderData ? maxOrderData.order_index + 1 : 0;
+
+    const { data: newQuestion } = await supabase
+      .from('lesson_quiz_questions')
+      .insert({
+        lesson_quiz_id: lessonQuizId,
+        question_text: 'New question',
+        options: ['Option A', 'Option B', 'Option C', 'Option D'],
+        correct_answer: 0,
+        order_index: nextOrder,
+      })
+      .select()
+      .single();
+
+    if (newQuestion) {
+      await supabase
+        .from('admin_action_logs')
+        .insert({
+          admin_user_id: user.id,
+          action_type: 'lesson_quiz_question_created',
+          target_type: 'lesson_quiz_question',
+          target_id: newQuestion.id,
+          details: {
+            lesson_quiz_id: lessonQuizId,
+          },
+        });
+    }
+
+    loadLessonQuizQuestions(lessonQuizId);
+  }
+
+  async function moveLessonQuizQuestion(questionId: string, lessonQuizId: string, direction: 'up' | 'down') {
+    if (!isQuizAdmin) return;
+    const currentIndex = lessonQuizQuestions.findIndex((q) => q.id === questionId);
+    if (currentIndex === -1) return;
+    if (direction === 'up' && currentIndex === 0) return;
+    if (direction === 'down' && currentIndex === lessonQuizQuestions.length - 1) return;
+
+    const swapIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    const currentQuestion = lessonQuizQuestions[currentIndex];
+    const swapQuestion = lessonQuizQuestions[swapIndex];
+
+    await Promise.all([
+      supabase
+        .from('lesson_quiz_questions')
+        .update({ order_index: swapQuestion.order_index })
+        .eq('id', currentQuestion.id),
+      supabase
+        .from('lesson_quiz_questions')
+        .update({ order_index: currentQuestion.order_index })
+        .eq('id', swapQuestion.id),
+    ]);
+
+    loadLessonQuizQuestions(lessonQuizId);
   }
 
   function closeStudentModal() {
@@ -1341,24 +1723,74 @@ export function Admin() {
                         </div>
                         <div className="divide-y divide-gray-200">
                           {lessons.map((lesson) => (
-                            <div key={lesson.id} className="px-6 py-4 flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <div className="font-medium text-gray-900">{lesson.title}</div>
-                                  {lesson.is_active === false && (
-                                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">
-                                      Inactive
-                                    </span>
-                                  )}
+                            <div key={lesson.id}>
+                              <div className="px-6 py-4 flex items-center justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="font-medium text-gray-900">{lesson.title}</div>
+                                    {lesson.is_active === false && (
+                                      <span className="px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">
+                                        Inactive
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-gray-600 mt-1 line-clamp-2">{lesson.content}</div>
                                 </div>
-                                <div className="text-sm text-gray-600 mt-1 line-clamp-2">{lesson.content}</div>
+                                <div className="flex gap-2">
+                                  {isQuizAdmin && (
+                                    <button
+                                      onClick={() => loadLessonQuiz(lesson.id)}
+                                      className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                                    >
+                                      {lessonQuizzes.length > 0 && lessonQuizzes[0]?.lesson_id === lesson.id ? 'Hide' : 'Show'} Quiz
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => loadLessonForEdit(lesson)}
+                                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                                  >
+                                    Edit
+                                  </button>
+                                </div>
                               </div>
-                              <button
-                                onClick={() => loadLessonForEdit(lesson)}
-                                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                              >
-                                Edit
-                              </button>
+
+                              {lessonQuizzes.length > 0 && lessonQuizzes[0]?.lesson_id === lesson.id && (
+                                <div className="px-6 pb-4 bg-gray-50">
+                                  <div className="bg-white rounded-lg border border-gray-200 p-4">
+                                    <div className="mb-4">
+                                      <h5 className="font-semibold text-gray-900 mb-2">Knowledge Check Quiz</h5>
+                                      <p className="text-sm text-gray-600">
+                                        Passing Score: {lessonQuizzes[0].passing_score}%
+                                      </p>
+                                    </div>
+
+                                    <div className="divide-y divide-gray-200">
+                                      {lessonQuizQuestions.map((question, idx) => (
+                                        <LessonQuizQuestionEditor
+                                          key={question.id}
+                                          question={question}
+                                          index={idx}
+                                          onSave={saveLessonQuizQuestion}
+                                          onDelete={() => deleteLessonQuizQuestion(question.id, lessonQuizzes[0].id)}
+                                          onMoveUp={() => moveLessonQuizQuestion(question.id, lessonQuizzes[0].id, 'up')}
+                                          onMoveDown={() => moveLessonQuizQuestion(question.id, lessonQuizzes[0].id, 'down')}
+                                          isFirst={idx === 0}
+                                          isLast={idx === lessonQuizQuestions.length - 1}
+                                        />
+                                      ))}
+                                    </div>
+
+                                    <div className="mt-4 pt-4 border-t border-gray-200">
+                                      <button
+                                        onClick={() => addLessonQuizQuestion(lessonQuizzes[0].id)}
+                                        className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                                      >
+                                        Add Question
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

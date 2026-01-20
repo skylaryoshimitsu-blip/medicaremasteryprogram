@@ -3,12 +3,13 @@ import { supabase, Entitlement } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 export function useEntitlement() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const hasAccess = entitlement?.has_active_access ?? false;
+  const isAdmin = profile?.email === 'support@medicaremastery.com' || profile?.role === 'admin';
+  const hasAccess = isAdmin || (entitlement?.has_active_access ?? false);
 
   useEffect(() => {
     if (!user) {

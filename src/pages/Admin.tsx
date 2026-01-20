@@ -177,7 +177,7 @@ type PhaseUnlock = {
   };
 };
 
-type Tab = 'students' | 'progress' | 'uploads' | 'content';
+type Tab = 'students' | 'progress' | 'uploads' | 'content' | 'phase-unlock';
 
 type Lesson = {
   id: string;
@@ -213,6 +213,13 @@ export function Admin() {
   const [editingLesson, setEditingLesson] = useState(false);
   const [rejectingUpload, setRejectingUpload] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [adminPhases, setAdminPhases] = useState<any[]>([]);
+  const [selectedStudentForPhaseUnlock, setSelectedStudentForPhaseUnlock] = useState<Profile | null>(null);
+  const [studentPhases, setStudentPhases] = useState<any[]>([]);
+  const [expandedPhase, setExpandedPhase] = useState<number | null>(null);
+  const [phaseModules, setPhaseModules] = useState<any[]>([]);
+  const [expandedModule, setExpandedModule] = useState<string | null>(null);
+  const [moduleLessons, setModuleLessons] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -322,6 +329,63 @@ export function Admin() {
         .select('*')
         .order('order_index');
       if (data) setModules(data);
+    }
+
+    if (activeTab === 'phase-unlock') {
+      const [modulesRes, currentUserRes, studentsRes] = await Promise.all([
+        supabase.from('modules').select('*').order('phase_number'),
+        supabase.auth.getUser(),
+        supabase.from('profiles').select('*').eq('role', 'student').order('created_at', { ascending: false }),
+      ]);
+
+      if (modulesRes.data) {
+        setModules(modulesRes.data);
+
+        if (currentUserRes.data.user) {
+          const { data: progressData } = await supabase
+            .from('user_progress')
+            .select('module_id, is_unlocked')
+            .eq('user_id', currentUserRes.data.user.id);
+
+          const phaseStatus = modulesRes.data.map((module) => {
+            const progress = progressData?.find((p) => p.module_id === module.id);
+            return {
+              phase_number: module.phase_number,
+              phase_name: `Phase ${module.phase_number}`,
+              module_id: module.id,
+              title: module.title,
+              is_unlocked: progress?.is_unlocked || false,
+            };
+          });
+
+          setAdminPhases(phaseStatus);
+        }
+      }
+
+      if (studentsRes.data) {
+        const studentsWithDetails = await Promise.all(
+          studentsRes.data.map(async (student) => {
+            const { data: progressData } = await supabase
+              .from('user_progress')
+              .select('module_id, is_completed, modules!inner(phase_number)')
+              .eq('user_id', student.id)
+              .order('modules(phase_number)');
+
+            const currentPhase = progressData?.find((p) => !p.is_completed);
+            const completedCount = progressData?.filter((p) => p.is_completed).length || 0;
+
+            return {
+              ...student,
+              currentPhase: currentPhase
+                ? `Phase ${(currentPhase.modules as any).phase_number}`
+                : 'Completed',
+              progress: Math.round((completedCount / (progressData?.length || 1)) * 100),
+              lastActivityAt: student.last_activity_at,
+            };
+          })
+        );
+        setStudents(studentsWithDetails);
+      }
     }
 
     setLoading(false);
@@ -648,6 +712,196 @@ export function Admin() {
     setExamAttempts([]);
   }
 
+  async function unlockPhaseForAdmin(moduleId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: existing } = await supabase
+      .from('user_progress')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('module_id', moduleId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('user_progress')
+        .update({
+          is_unlocked: true,
+          unlocked_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('user_progress').insert({
+        user_id: user.id,
+        module_id: moduleId,
+        is_unlocked: true,
+        unlocked_at: new Date().toISOString(),
+      });
+    }
+
+    loadData();
+  }
+
+  async function selectStudentForPhaseUnlock(student: Profile) {
+    setSelectedStudentForPhaseUnlock(student);
+
+    const { data: progressData } = await supabase
+      .from('user_progress')
+      .select('module_id, is_unlocked')
+      .eq('user_id', student.id);
+
+    const phaseStatus = modules.map((module) => {
+      const progress = progressData?.find((p) => p.module_id === module.id);
+      return {
+        phase_number: module.phase_number,
+        phase_name: `Phase ${module.phase_number}`,
+        module_id: module.id,
+        title: module.title,
+        is_unlocked: progress?.is_unlocked || false,
+      };
+    });
+
+    setStudentPhases(phaseStatus);
+  }
+
+  async function unlockPhaseForStudent(moduleId: string) {
+    if (!selectedStudentForPhaseUnlock) return;
+
+    const { data: existing } = await supabase
+      .from('user_progress')
+      .select('id')
+      .eq('user_id', selectedStudentForPhaseUnlock.id)
+      .eq('module_id', moduleId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('user_progress')
+        .update({
+          is_unlocked: true,
+          unlocked_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('user_progress').insert({
+        user_id: selectedStudentForPhaseUnlock.id,
+        module_id: moduleId,
+        is_unlocked: true,
+        unlocked_at: new Date().toISOString(),
+      });
+    }
+
+    selectStudentForPhaseUnlock(selectedStudentForPhaseUnlock);
+  }
+
+  async function unlockAllPhasesForStudent() {
+    if (!selectedStudentForPhaseUnlock) return;
+    if (!confirm(`Unlock all phases for ${selectedStudentForPhaseUnlock.full_name}?`)) return;
+
+    const unlockPromises = modules.map((module) => {
+      return supabase
+        .from('user_progress')
+        .upsert({
+          user_id: selectedStudentForPhaseUnlock.id,
+          module_id: module.id,
+          is_unlocked: true,
+          unlocked_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,module_id'
+        });
+    });
+
+    await Promise.all(unlockPromises);
+    selectStudentForPhaseUnlock(selectedStudentForPhaseUnlock);
+  }
+
+  async function togglePhaseExpansion(phaseNumber: number) {
+    if (expandedPhase === phaseNumber) {
+      setExpandedPhase(null);
+      setPhaseModules([]);
+      return;
+    }
+
+    setExpandedPhase(phaseNumber);
+    const module = modules.find((m) => m.phase_number === phaseNumber);
+    if (!module || !selectedStudentForPhaseUnlock) return;
+
+    const { data: lessonsData } = await supabase
+      .from('lessons')
+      .select('id, title, order_index, is_active')
+      .eq('module_id', module.id)
+      .order('order_index');
+
+    if (lessonsData) {
+      const { data: completionsData } = await supabase
+        .from('lesson_completions')
+        .select('lesson_id')
+        .eq('user_id', selectedStudentForPhaseUnlock.id);
+
+      const lessonStatus = lessonsData.map((lesson) => ({
+        ...lesson,
+        is_completed: completionsData?.some((c) => c.lesson_id === lesson.id) || false,
+      }));
+
+      setPhaseModules([{ module_id: module.id, lessons: lessonStatus }]);
+    }
+  }
+
+  async function unlockLessonForStudent(lessonId: string) {
+    if (!selectedStudentForPhaseUnlock) return;
+
+    const { data: existing } = await supabase
+      .from('lesson_completions')
+      .select('id')
+      .eq('user_id', selectedStudentForPhaseUnlock.id)
+      .eq('lesson_id', lessonId)
+      .maybeSingle();
+
+    if (!existing) {
+      await supabase.from('lesson_completions').insert({
+        user_id: selectedStudentForPhaseUnlock.id,
+        lesson_id: lessonId,
+      });
+    }
+
+    if (expandedPhase !== null) {
+      togglePhaseExpansion(expandedPhase);
+    }
+  }
+
+  async function unlockAllLessonsInPhase(phaseNumber: number) {
+    if (!selectedStudentForPhaseUnlock) return;
+    if (!confirm(`Unlock all lessons in Phase ${phaseNumber}?`)) return;
+
+    const module = modules.find((m) => m.phase_number === phaseNumber);
+    if (!module) return;
+
+    const { data: lessonsData } = await supabase
+      .from('lessons')
+      .select('id')
+      .eq('module_id', module.id);
+
+    if (lessonsData) {
+      const completionPromises = lessonsData.map((lesson) => {
+        return supabase
+          .from('lesson_completions')
+          .upsert({
+            user_id: selectedStudentForPhaseUnlock.id,
+            lesson_id: lesson.id,
+          }, {
+            onConflict: 'user_id,lesson_id'
+          });
+      });
+
+      await Promise.all(completionPromises);
+    }
+
+    if (expandedPhase !== null) {
+      togglePhaseExpansion(expandedPhase);
+    }
+  }
+
   return (
     <div className="flex">
       <Sidebar />
@@ -699,6 +953,16 @@ export function Admin() {
                 }`}
               >
                 Content Manager
+              </button>
+              <button
+                onClick={() => setActiveTab('phase-unlock')}
+                className={`px-6 py-3 text-sm font-medium border-b-2 ${
+                  activeTab === 'phase-unlock'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                }`}
+              >
+                Phase Unlock
               </button>
             </nav>
           </div>
@@ -1194,6 +1458,238 @@ export function Admin() {
                       </div>
                     </div>
                   )}
+                </>
+              )}
+
+              {activeTab === 'phase-unlock' && (
+                <>
+                  <div className="bg-white rounded-lg border border-gray-200 mb-6">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                      <h3 className="text-lg font-semibold text-gray-900">Admin Phase Control</h3>
+                      <p className="text-sm text-gray-600 mt-1">Manage your own phase unlocks</p>
+                    </div>
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Phase Name
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Current Status
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {adminPhases.map((phase) => (
+                          <tr key={phase.phase_number}>
+                            <td className="px-6 py-4 text-sm text-gray-900">{phase.phase_name}</td>
+                            <td className="px-6 py-4">
+                              {phase.is_unlocked ? (
+                                <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                                  Unlocked
+                                </span>
+                              ) : (
+                                <span className="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded">
+                                  Locked
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              {phase.is_unlocked ? (
+                                <button
+                                  disabled
+                                  className="px-4 py-2 text-sm text-gray-400 bg-gray-100 rounded cursor-not-allowed"
+                                >
+                                  Already Unlocked
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => unlockPhaseForAdmin(phase.module_id)}
+                                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                                >
+                                  Unlock Phase
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="bg-white rounded-lg border border-gray-200">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                      <h3 className="text-lg font-semibold text-gray-900">Student Phase Control</h3>
+                      <p className="text-sm text-gray-600 mt-1">Select a student to manage their phase unlocks</p>
+                    </div>
+
+                    {!selectedStudentForPhaseUnlock ? (
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                              Student Name
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                              Email
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                              Action
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {students.map((student) => (
+                            <tr key={student.id}>
+                              <td className="px-6 py-4 text-sm text-gray-900">{student.full_name}</td>
+                              <td className="px-6 py-4 text-sm text-gray-600">{student.email}</td>
+                              <td className="px-6 py-4">
+                                <button
+                                  onClick={() => selectStudentForPhaseUnlock(student)}
+                                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                                >
+                                  Select
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div>
+                        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                          <div>
+                            <h4 className="font-medium text-gray-900">
+                              {selectedStudentForPhaseUnlock.full_name}
+                            </h4>
+                            <p className="text-sm text-gray-600">{selectedStudentForPhaseUnlock.email}</p>
+                          </div>
+                          <div className="flex gap-3">
+                            <button
+                              onClick={unlockAllPhasesForStudent}
+                              className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                            >
+                              Unlock All Phases
+                            </button>
+                            <button
+                              onClick={() => setSelectedStudentForPhaseUnlock(null)}
+                              className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 rounded"
+                            >
+                              Back to Students
+                            </button>
+                          </div>
+                        </div>
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                Phase
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                Status
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                Actions
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {studentPhases.map((phase) => (
+                              <>
+                                <tr key={phase.phase_number}>
+                                  <td className="px-6 py-4">
+                                    <button
+                                      onClick={() => togglePhaseExpansion(phase.phase_number)}
+                                      className="text-sm font-medium text-gray-900 hover:text-blue-600"
+                                    >
+                                      {expandedPhase === phase.phase_number ? '▼' : '▶'} {phase.phase_name}
+                                    </button>
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    {phase.is_unlocked ? (
+                                      <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                                        Unlocked
+                                      </span>
+                                    ) : (
+                                      <span className="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded">
+                                        Locked
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4">
+                                    <div className="flex gap-2">
+                                      {phase.is_unlocked ? (
+                                        <button
+                                          disabled
+                                          className="px-4 py-2 text-sm text-gray-400 bg-gray-100 rounded cursor-not-allowed"
+                                        >
+                                          Phase Unlocked
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={() => unlockPhaseForStudent(phase.module_id)}
+                                          className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                                        >
+                                          Unlock Phase
+                                        </button>
+                                      )}
+                                      {expandedPhase === phase.phase_number && (
+                                        <button
+                                          onClick={() => unlockAllLessonsInPhase(phase.phase_number)}
+                                          className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                                        >
+                                          Unlock All Lessons
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                                {expandedPhase === phase.phase_number && phaseModules.length > 0 && (
+                                  <tr>
+                                    <td colSpan={3} className="px-6 py-4 bg-gray-50">
+                                      <div className="space-y-2">
+                                        <h5 className="text-sm font-medium text-gray-700 mb-3">Lessons:</h5>
+                                        {phaseModules[0]?.lessons?.map((lesson: any) => (
+                                          <div
+                                            key={lesson.id}
+                                            className="flex items-center justify-between py-2 px-4 bg-white rounded border border-gray-200"
+                                          >
+                                            <span className="text-sm text-gray-900">{lesson.title}</span>
+                                            <div className="flex items-center gap-3">
+                                              {lesson.is_completed ? (
+                                                <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                                                  Completed
+                                                </span>
+                                              ) : (
+                                                <>
+                                                  <span className="px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded">
+                                                    Not Completed
+                                                  </span>
+                                                  <button
+                                                    onClick={() => unlockLessonForStudent(lesson.id)}
+                                                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                                                  >
+                                                    Mark Complete
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </>
